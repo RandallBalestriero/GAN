@@ -28,8 +28,8 @@ args = parse.parse_args()
 
 def generator(Z, out_dim, dropout, D=32):
     layer = [layers.Dense(Z, D)]
-#    layer.append(layers.Activation(layer[-1], T.relu))
-#    layer.append(layers.Dense(layer[-1]*dropout[0], D))
+    layer.append(layers.Activation(layer[-1], T.relu))
+    layer.append(layers.Dense(layer[-1], D * 2))
     layer.append(layers.Activation(layer[-1], T.relu))
     layer.append(layers.Dense(layer[-1] * dropout, out_dim))
     return layer
@@ -44,7 +44,7 @@ def discriminator(X, D=32):
 
 # some hyper parameters
 BS = 100
-lr = 0.001
+lr = 0.0001
 Z = 1
 X = 2
 WG = args.WG
@@ -62,7 +62,7 @@ DATA += np.random.randn(1000, 2) * 0.01
 # create the graph inputs
 x = T.Placeholder([BS, X], 'float32')
 z = T.Placeholder([BS, Z], 'float32')
-dropout = T.Placeholder((WG,), 'float32')
+dropout = T.Placeholder((2 * WG,), 'float32')
 
 # and now the computational graph
 G = generator(z, 2, dropout, WG)
@@ -83,43 +83,41 @@ D_ups = optimizers.Adam(D_loss, D_vars, lr)
 G_ups = optimizers.Adam(G_loss, G_vars, lr)
 updates = {**D_ups, **G_ups}
 
-# get the A vectors for the generator
-PP = [gradients(G[-1][:,0], [z]), gradients(G[-1][:, 1], [z])]
-G_A = T.concatenate([PP[0][0], PP[1][0]], 1)
 
 # create the function that will compile the graph
 f = function(z, x, dropout, outputs = [D_loss, G_loss], updates = updates)
 g = function(z, dropout, outputs=[G[-1]])
-get_A = function(z, outputs=[G_A])
 
 # training
 print('training')
-for epoch in range(3000):
+for epoch in range(5000):
     for x in batchify(DATA, batch_size=BS, option='random_see_all'):
         z = np.random.rand(BS, Z) * 2 -1
-        dropout = (np.random.rand(WG) > 0.5).astype('int32')
+        dropout = (np.random.rand(WG * 2) > 0.2).astype('int32')
         f(z, x, dropout)
 
 # sampling final distribution and As
-combinations = list(product([0, 1],repeat = 200))
-for i in range(len(combinations)):
-    p = np.permutation(WG)
-    o = np.ones(WG)
-    o[p[:200]] = combinations[i]
-    combinations[i] = o + 0.
-
-
 line = np.linspace(-1, 1, 10000).reshape((-1, 1))
+combinations = list(product([0, 1],repeat = 10))
+
+print(len(combinations[0]))
+for i in range(len(combinations)):
+    indices = np.random.permutation(WG * 2)[:len(combinations[i])]
+    base = np.ones(WG * 2)
+    base[indices] = combinations[i]
+    combinations[i] = base + 0.
+
+
 
 GG = list()
-for i in tqdm.tqdm(range(2**(WG))):
+for i in tqdm.tqdm(range(len(combinations))):
     dropout = np.array(combinations[i])
     G = list()
     for x in batchify(line, batch_size=BS, option='continuous'):
         G.append(g(x, dropout)[0])
     GG.append(np.concatenate(G))
 
-dropout = np.array(np.ones(WG))
+dropout = np.array(np.ones(WG * 2))
 G = list()
 for x in batchify(line, batch_size=BS, option='continuous'):
     G.append(g(x, dropout)[0])
@@ -128,7 +126,7 @@ HH = np.concatenate(G)
 
 # sampling final distribution
 H = list()
-dropout = np.ones(WG)
+dropout = np.ones(WG * 2)
 for i in range(100):
     H.append(g(np.random.rand(BS, Z) * 2 - 1, dropout)[0])
 H = np.concatenate(H)

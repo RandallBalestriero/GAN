@@ -8,7 +8,7 @@ from scipy.io.wavfile import read
 import glob
 import theanoxla
 import theanoxla.tensor as T
-from theanoxla import layers, losses, optimizers, function, gradients
+from theanoxla import layers, losses, optimizers, function, gradients, jacobians
 from theanoxla.utils import batchify
 import matplotlib.pyplot as plt
 from jax.lib import xla_client
@@ -90,8 +90,11 @@ G_ups = optimizers.Adam(G_loss, G_vars, lr)
 updates = {**D_ups, **G_ups}
 
 # get the A vectors for the generator
-PP = [gradients(G[-1][:,0], [z]), gradients(G[-1][:, 1], [z])]
-G_A = T.concatenate([PP[0][0], PP[1][0]], 1)
+#PP = [gradients(G[-1][:,0], [z]), gradients(G[-1][:, 1], [z])]
+G_A = (jacobians(G[-1], [z])[0]).squeeze()
+print(G_A.shape)
+#asdf
+#G_A = T.concatenate([PP[0][0], PP[1][0]], 1)
 
 # create the function that will compile the graph
 f = function(z, x, outputs = [D_loss, G_loss], updates = updates)
