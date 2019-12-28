@@ -8,6 +8,8 @@ from theanoxla.utils import batchify, vq_to_boundary
 from sklearn import datasets
 import matplotlib.pyplot as plt
 import argparse
+from tqdm import tqdm
+
 
 parse = argparse.ArgumentParser()
 parse.add_argument('--radius', type=float, default=1)
@@ -15,6 +17,8 @@ parse.add_argument('--std', type=float, default=1)
 parse.add_argument('--D', type=int, default = 2)
 parse.add_argument('--WG', type=int, default=64)
 parse.add_argument('--n_modes', type=int, default=4)
+parse.add_argument('--run', type=int)
+
 args = parse.parse_args()
 
 
@@ -40,10 +44,11 @@ BS = 100
 lr = 0.00005
 
 # create dataset
-centroids = np.random.randn(args.n_modes, 2)
+centroids = np.random.randn(args.n_modes, args.D)
 centroids /= np.sqrt((centroids**2).sum(1, keepdims=True))
-DATA = np.random.randn(args.n_modes * 150, 2) * args.std
-DATA += centroids.repeat(0, 150)
+centroids *= args.radius
+DATA = np.random.randn(args.n_modes * 150, args.D) * args.std
+DATA += centroids.repeat(150, 0)
 
 # create placeholders and predictions
 X = T.Placeholder([BS, args.D], 'float32')
@@ -61,8 +66,8 @@ gen_loss = losses.sparse_crossentropy_logits(1 - labels[:BS],
 masks = T.concatenate([G_sample[1] > 0, G_sample[3] > 0], 1)
 
 # compute the slope matrix for the poitns and its determinant
-A = T.stack([gradients(G_sample[-1][:,0].sum(), [Z])[0],
-             gradients(G_sample[-1][:,1].sum(), [Z])[0]], 1)
+A = T.stack([gradients(G_sample[-1][:,i].sum(), [Z])[0]
+             for i in range(args.D)], 1)
 det = T.abs(T.det(A))
 
 # variables
@@ -81,7 +86,7 @@ g = function(Z, outputs=[G_sample[-1]])
 h = function(Z, outputs=[det])
 
 # do training
-for epoch in range(12000):
+for epoch in tqdm(range(12000), desc='training'):
     for x in batchify(DATA, batch_size=BS, option='random_see_all'):
         z = np.random.rand(BS, args.D) * 2 -1
         f(z, x)
@@ -92,4 +97,9 @@ O = list()
 for x in batchify(XX, batch_size=BS, option='continuous'):
     O.append(h(x)[0])
 O = np.concatenate(O)
+
+filename = 'determinant_comparison_{}_{}_{}_{}_{}_{}.npz'
+np.savez(filename.format(args.radius, args.std, args.D, args.WG, args.n_modes, args.run),
+         determinant=O)
+
 
