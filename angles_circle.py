@@ -18,8 +18,8 @@ import argparse
 
 
 parse = argparse.ArgumentParser()
-parse.add_argument('--dataset', type=str)
-parse.add_argument('--WG', type=int)
+parse.add_argument('--dataset', type=str, default='circle')
+parse.add_argument('--WG', type=int, default=128)
 args = parse.parse_args()
 
 
@@ -30,7 +30,7 @@ def get_angles(points, get_A):
     A = np.concatenate(A)
     angles = np.abs((A[:-1]*A[1:]).sum(1))
     angles /= np.sqrt((A[:-1]**2).sum(1) * (A[1:]**2).sum(1))
-    angles = np.arccos(np.clip(angles, 0, 1))
+    angles = np.arcsin(1-angles)
     return angles
 
 
@@ -38,13 +38,17 @@ def get_angles(points, get_A):
 def generator(Z, out_dim, D=32):
     layer = [layers.Dense(Z, D)]
     layer.append(layers.Activation(layer[-1], T.leaky_relu))
-#    layer.append(layers.Dense(layer[-1], D))
-#    layer.append(layers.Activation(layer[-1], T.leaky_relu))
+    layer.append(layers.Dense(layer[-1], D))
+    layer.append(layers.Activation(layer[-1], T.leaky_relu))
+    layer.append(layers.Dense(layer[-1], D))
+    layer.append(layers.Activation(layer[-1], T.leaky_relu))
     layer.append(layers.Dense(layer[-1], out_dim))
     return layer
 
-def discriminator(X, D=32):
+def discriminator(X, D=64):
     layer = [layers.Dense(X, D)]
+    layer.append(layers.Activation(layer[-1], T.leaky_relu))
+    layer.append(layers.Dense(layer[-1], D))
     layer.append(layers.Activation(layer[-1], T.leaky_relu))
     layer.append(layers.Dense(layer[-1], D))
     layer.append(layers.Activation(layer[-1], T.leaky_relu))
@@ -53,18 +57,24 @@ def discriminator(X, D=32):
 
 # some hyper parameters
 BS = 100
-lr = 0.001
+lr = 0.0001
 Z = 1
 X = 2
 WG = args.WG
 # create the data
-DATA = np.random.randn(1000, 2)
-if args.dataset == 'circle':
-    DATA /= np.sqrt((DATA**2).sum(1, keepdims=True))
-elif args.dataset == 'square':
-    DATA /= np.abs(DATA).sum(1, keepdims=True)
+DATA = np.random.randn(2000, 2)
+
+case = (DATA[:, 0] > 0) & (DATA[:, 1] < 0)
+DATA[case] = DATA[case] / np.sqrt((DATA[case]**2).sum(1, keepdims=True))
+
+case = (DATA[:, 0] < 0) & (DATA[:, 1] < 0)
+DATA[case] = DATA[case] / np.abs(DATA[case]).sum(1, keepdims=True)
+
+case = (DATA[:, 1] > 0)
+DATA[case] = DATA[case] / np.abs(DATA[case]).max(1, keepdims=True)
+
 # add some noise
-DATA += np.random.randn(1000, 2) * 0.1
+DATA += np.random.randn(2000, 2) * 0.01
 
 # create the graph inputs
 x = T.Placeholder([BS, X], 'float32')
@@ -85,8 +95,8 @@ D_vars = sum([l.variables() for l in D], [])
 G_vars = sum([l.variables() for l in G], [])
 
 # optimizers generating the updates
-D_ups = optimizers.Adam(D_loss, D_vars, lr)
-G_ups = optimizers.Adam(G_loss, G_vars, lr)
+D_ups, _ = optimizers.Adam(D_loss, D_vars, lr)
+G_ups, _ = optimizers.Adam(G_loss, G_vars, lr)
 updates = {**D_ups, **G_ups}
 
 # get the A vectors for the generator
@@ -103,7 +113,7 @@ get_A = function(z, outputs=[G_A])
 
 # training
 print('training')
-for epoch in range(3000):
+for epoch in range(8000):
     for x in batchify(DATA, batch_size=BS, option='random_see_all'):
         z = np.random.rand(BS, Z) * 2 -1
         f(z, x)
@@ -128,16 +138,16 @@ for i in range(100):
     H.append(g(np.random.rand(BS, Z) * 2 - 1)[0])
 H = np.concatenate(H)
 
-
-#plt.plot(DATA[:,0], DATA[:,1], 'bx')
-#plt.plot(H[:,0], H[:,1], 'rx')
-#plt.plot(G[:,0], G[:,1], '-k')
 plt.subplot(121)
-cmap = matplotlib.cm.get_cmap('jet')
+plt.plot(DATA[:,0], DATA[:,1], 'bx', alpha=0.07)
+plt.plot(G[:,0], G[:,1], '-k', alpha=0.5, lw=2)
+
+cmap = matplotlib.cm.get_cmap('Wistia')
 ANGLES = angles/angles.max()
-colors = cmap(ANGLES)
-colors[:, -1] = (ANGLES > 1e-4).astype('float32')
-plt.scatter(G[1:,0], G[1:, 1], s=(ANGLES**2).reshape((-1,1))*40, c=colors)
+#ANGLES = ANGLES[ANGLES > 1e-8]
+colors = cmap(ANGLES**0.2)
+colors[:, -1] = (ANGLES > 1e-6).astype('float32')
+plt.scatter(G[1:,0], G[1:, 1], s=40, c=colors)
 
 plt.subplot(122)
 plt.hist(np.log(angles[angles > 1e-8]), 200)

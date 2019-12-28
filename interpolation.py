@@ -22,17 +22,19 @@ cmap = matplotlib.cm.get_cmap('hsv')
 np.random.seed(114)
 
 parse = argparse.ArgumentParser()
-parse.add_argument('--dataset', type=str, default='circle')
+parse.add_argument('--occlusion', type=int, default=1)
 parse.add_argument('--WG', type=int, default=64)
+parse.add_argument('--L', type=int, default=1)
 args = parse.parse_args()
 
 
 
-def generator(Z, out_dim, dropout, D=32):
+def generator(Z, out_dim, dropout, D=32, L=1):
     layer = [layers.Dense(Z, D)]
-    layer.append(layers.Activation(layer[-1], T.relu))
-    layer.append(layers.Dense(layer[-1], D * 2))
-    layer.append(layers.Activation(layer[-1], T.relu))
+    for l in range(L):
+        layer.append(layers.Activation(layer[-1], T.leaky_relu))
+        layer.append(layers.Dense(layer[-1], D * 2))
+    layer.append(layers.Activation(layer[-1], T.leaky_relu))
     layer.append(layers.Dense(layer[-1] * dropout, out_dim))
     return layer
 
@@ -45,21 +47,21 @@ def discriminator(X, D=64):
     return layer
 
 # some hyper parameters
-BS = 400
+BS = 300
 lr = 0.0002
 Z = 1
 X = 2
 WG = args.WG
+L = args.L
 
 # create the data
-DATA = np.random.randn(1000, 2)
-if args.dataset == 'circle':
-    DATA /= np.sqrt((DATA**2).sum(1, keepdims=True))
-elif args.dataset == 'square':
-    DATA /= np.abs(DATA).sum(1, keepdims=True)
+DATA = np.random.randn(1400, 2)
+DATA /= np.abs(DATA).max(1, keepdims=True)
+if args.occlusion:
+    DATA = DATA[np.sqrt((DATA**2).sum(1))<1.32]
 
 # add some noise
-DATA += np.random.randn(1000, 2) * 0.1
+DATA += np.random.randn(DATA.shape[0], 2) * 0.01
 
 # create the graph inputs
 x = T.Placeholder([BS, X], 'float32')
@@ -67,7 +69,7 @@ z = T.Placeholder([BS, Z], 'float32')
 dropout = T.Placeholder((2 * WG,), 'float32')
 
 # and now the computational graph
-G = generator(z, 2, dropout, WG)
+G = generator(z, 2, dropout, WG, L)
 D = discriminator(T.concatenate([G[-1], x]))
 
 labels = T.concatenate([T.zeros(BS, dtype='int32'), T.ones(BS, dtype='int32')])
@@ -81,8 +83,8 @@ D_vars = sum([l.variables() for l in D], [])
 G_vars = sum([l.variables() for l in G], [])
 
 # optimizers generating the updates
-D_ups = optimizers.Adam(D_loss, D_vars, lr)
-G_ups = optimizers.Adam(G_loss, G_vars, lr)
+D_ups, dvars = optimizers.Adam(D_loss, D_vars, lr)
+G_ups, gvars = optimizers.Adam(G_loss, G_vars, lr)
 updates = {**D_ups, **G_ups}
 
 
@@ -90,62 +92,45 @@ updates = {**D_ups, **G_ups}
 f = function(z, x, dropout, outputs = [D_loss, G_loss], updates = updates)
 g = function(z, dropout, outputs=[G[-1]])
 
-# training
-print('training')
-for epoch in range(12000):
-    for x in batchify(DATA, batch_size=BS, option='random_see_all'):
-        z = np.random.rand(BS, Z) * 2 -1
-        dropout = (np.random.rand(WG * 2) > 0.2).astype('int32')
-        f(z, x, dropout)
-
-# sampling final distribution and As
-line = np.linspace(-1, 1, 10000).reshape((-1, 1))
-combinations = list(product([0, 1],repeat = 10))
-
-print(len(combinations[0]))
-for i in range(len(combinations)):
-    indices = np.random.permutation(WG * 2)[:len(combinations[i])]
-    base = np.ones(WG * 2)
-    base[indices] = combinations[i]
-    combinations[i] = base + 0.
+allG = list()
+for T in range(5):
+    for var in D_vars:
+        var.reset()
+    for var in G_vars:
+        var.reset()
+    for var in dvars:
+        var.reset()
+    for var in gvars:
+        var.reset()
 
 
+    # training
+    print('training')
+    for epoch in range(12000):
+        for x in batchify(DATA, batch_size=BS, option='random_see_all'):
+            z = np.random.rand(BS, Z) * 2 -1
+            dropout = np.ones(WG * 2)
+            f(z, x, dropout)
 
-GG = list()
-for i in tqdm.tqdm(range(len(combinations))):
-    dropout = np.array(combinations[i])
+    # sampling final distribution and As
+    line = np.linspace(-1, 1, 10000).reshape((-1, 1))
+    dropout = np.array(np.ones(WG * 2))
     G = list()
     for x in batchify(line, batch_size=BS, option='continuous'):
         G.append(g(x, dropout)[0])
-    GG.append(np.concatenate(G))
+    allG.append(np.concatenate(G))
 
-dropout = np.array(np.ones(WG * 2))
-G = list()
-for x in batchify(line, batch_size=BS, option='continuous'):
-    G.append(g(x, dropout)[0])
-HH = np.concatenate(G)
-
-
-# sampling final distribution
-H = list()
-dropout = np.ones(WG * 2)
-for i in range(100):
-    H.append(g(np.random.rand(BS, Z) * 2 - 1, dropout)[0])
-H = np.concatenate(H)
 
 fig = plt.figure(figsize=(4,4))
-
 plt.plot(DATA[:, 0], DATA[:, 1], 'xb', alpha=0.5)
-
-for t, gg in zip(np.linspace(0, 0.8, 5), GG[:5]):
-    plt.plot(gg[:,0], gg[:,1], color=cmap(t), lw=3)
-
-plt.plot(HH[:, 0], HH[:, 1], color=cmap(1), lw=3)
+for G in allG:
+    plt.plot(G[:, 0], G[:, 1], color=cmap(1), lw=3)
 plt.xticks([])
 plt.yticks([])
 plt.tight_layout()
 ax = plt.gca()
 ax.axis('off')
 fig.patch.set_visible(False)
-plt.savefig('dropout_circle.jpg')
-
+plt.show(block=True)
+plt.savefig('interpolation_{}_{}_{}.jpg'.format(args.occlusion, WG, L))
+plt.close()
