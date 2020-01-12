@@ -20,6 +20,8 @@ import argparse
 parse = argparse.ArgumentParser()
 parse.add_argument('--dataset', type=str, default='circle')
 parse.add_argument('--WG', type=int, default=128)
+parse.add_argument('--run', type=int, default=0)
+
 args = parse.parse_args()
 
 
@@ -114,6 +116,7 @@ get_A = function(z, outputs=[G_A])
 # training
 print('training')
 for epoch in range(8000):
+    print(epoch)
     for x in batchify(DATA, batch_size=BS, option='random_see_all'):
         z = np.random.rand(BS, Z) * 2 -1
         f(z, x)
@@ -123,6 +126,7 @@ G = list()
 print('training')
 line = np.linspace(-1, 1, 10000).reshape((-1, 1))
 for x in batchify(line, batch_size=BS, option='continuous'):
+    print(1)
     G.append(g(x)[0])
 G = np.concatenate(G)
 
@@ -135,21 +139,29 @@ print(angles.min(), angles.max())
 H = list()
 line = np.linspace(-1, 1, 10000)
 for i in range(100):
+    print(i)
     H.append(g(np.random.rand(BS, Z) * 2 - 1)[0])
 H = np.concatenate(H)
 
-plt.subplot(121)
-plt.plot(DATA[:,0], DATA[:,1], 'bx', alpha=0.07)
-plt.plot(G[:,0], G[:,1], '-k', alpha=0.5, lw=2)
+#plt.subplot(121)
+plt.figure(figsize=(9, 9))
 
 cmap = matplotlib.cm.get_cmap('Wistia')
 ANGLES = angles/angles.max()
 #ANGLES = ANGLES[ANGLES > 1e-8]
 colors = cmap(ANGLES**0.2)
 colors[:, -1] = (ANGLES > 1e-6).astype('float32')
-plt.scatter(G[1:,0], G[1:, 1], s=40, c=colors)
+colors_b = colors + 0
+colors_b[:, :-1] *= 0#10
+#colors_b = np.clip(colors_b, 0, 1)
 
-plt.subplot(122)
-plt.hist(np.log(angles[angles > 1e-8]), 200)
-plt.show(block=True)
+plt.scatter(G[1:,0], G[1:, 1], s=450, c=colors, edgecolors=colors_b, linewidth=3)
+plt.plot(DATA[:,0], DATA[:,1], 'bx', alpha=0.09)
+plt.plot(G[:,0], G[:,1], '-k', alpha=0.65, lw=3.)
+
+ax = plt.gca()
+ax.axis('off')
+#plt.subplot(122)
+#plt.hist(np.log(angles[angles > 1e-8]), 200)
+plt.savefig('angle_2d_{}_{}.jpg'.format(args.WG, args.run))
 

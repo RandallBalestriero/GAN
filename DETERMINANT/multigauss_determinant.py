@@ -15,8 +15,6 @@ parse.add_argument('--WG', type=int, default=64)
 args = parse.parse_args()
 
 
-
-
 def generator(Z, out_dim, D=64):
     layer = [layers.Dense(Z, D)]
     layer.append(layers.Activation(layer[-1], T.leaky_relu))
@@ -86,74 +84,43 @@ f = function(Z, X, outputs = [disc_loss, gen_loss],
 g = function(Z, outputs=[G_sample[-1]])
 h = function(Z, outputs=[masks, det])
 
-# do training
+##### TRAINING
+
 for epoch in range(12000):
     for x in batchify(DATA, batch_size=BS, option='random_see_all'):
         z = np.random.rand(BS, 2) * 2 -1
         f(z, x)
 
-# samples from the generator
+##### SAMPLE POINTS
 G = list()
 for i in range(10):
         z = np.random.rand(BS, 2) * 2 -1
         G.append(g(z)[0])
 G = np.concatenate(G)
 
-#
+#### SAMPLE DETS
 NN = 400
 MIN, MAX = -1, 1
 xx, yy = np.meshgrid(np.linspace(MIN, MAX, NN), np.linspace(MIN, MAX, NN))
 XX = np.stack([xx.flatten(), yy.flatten()], 1)
-O = list()
 O2 = list()
 for x in batchify(XX, batch_size=BS, option='continuous'):
     a, b = h(x)
-    O.append(a)
     O2.append(b)
-O = np.concatenate(O)
 O2 = np.log(np.concatenate(O2))
-print(O2)
-partition = vq_to_boundary(O, NN, NN)
-partition_location = XX[partition.reshape((-1,)) > 0]
 
-# 
-F = list()
-for x in batchify(partition_location, batch_size=BS, option='continuous'):
-    F.append(g(x)[0])
-F = np.concatenate(F)
+##### SAMPLE REGIONS
 
-p2 = np.zeros((NN*NN,))
-for i in range(len(F)):
-    distances = np.abs(XX - F[i]).max(1)
-    istar = distances.argmin()
-    if distances[istar] <= 6 / NN:
-        p2[istar] = 1
-
-#
-H1 = list()
-H2 = list()
-for i in range(7):
-    time = np.linspace(-1, 1, 200)
-    H1.append(np.stack([time, time*(np.random.rand()*4-2)], 1))
-    H2.append([])
-    for x in batchify(H1[-1], batch_size=BS, option='continuous'):
-        H2[-1].append(g(x)[0])
-    H2[-1] = np.concatenate(H2[-1])
-
-
-p2 = p2.reshape((NN, NN))
-
-############ GET PROBA
+# high proba case
 proba = np.exp(O2)
 high_samples = np.random.choice(range(len(XX)), size=1000, p=proba/ proba.sum())
-print(high_samples)
-
 high_samples = XX[high_samples]
 high_samples_out = list()
 for x in batchify(high_samples, batch_size=BS, option='continuous'):
     high_samples_out.append(g(x)[0])
 high_samples_out = np.concatenate(high_samples_out)
 
+# low proba case
 low_samples = np.random.choice(range(len(XX)), size=1000, p=(proba.max()-proba)/(proba.max()-proba).sum())
 low_samples = XX[low_samples]
 low_samples_out = list()
@@ -161,7 +128,9 @@ for x in batchify(low_samples, batch_size=BS, option='continuous'):
     low_samples_out.append(g(x)[0])
 low_samples_out = np.concatenate(low_samples_out)
 
-# plots
+###### PLOTS
+
+
 plt.figure(figsize=(4, 4))
 plt.imshow(O2.reshape((NN, NN)), aspect='auto', origin='lower',
            extent=(MIN, MAX, MIN, MAX))
