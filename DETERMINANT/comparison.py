@@ -3,7 +3,7 @@ sys.path.insert(0, "../../TheanoXLA")
 
 import numpy as np
 import theanoxla.tensor as T
-from theanoxla import layers, losses, optimizers, function, gradients
+from theanoxla import layers, losses, optimizers, function, gradients, jacobian_forward, jacobian_backward
 from theanoxla.utils import batchify, vq_to_boundary
 from sklearn import datasets
 import matplotlib.pyplot as plt
@@ -13,7 +13,8 @@ from scipy.special import gamma
 
 
 parse = argparse.ArgumentParser()
-parse.add_argument('--radius', type=float, default=1)
+parse.add_argument('--scale', type=float, default=1)
+parse.add_argument('--radius', type=float, default=0)
 parse.add_argument('--std', type=float, default=1)
 parse.add_argument('--D', type=int, default = 2)
 parse.add_argument('--WG', type=int, default=64)
@@ -32,33 +33,23 @@ def generator(Z, out_dim, D=32):
     return layer
 
 def discriminator(X):
-    layer = [layers.Dense(X, 64)]
+    layer = [layers.Dense(X, 16)]
     layer.append(layers.Activation(layer[-1], T.leaky_relu))
-    layer.append(layers.Dense(layer[-1], 64))
+    layer.append(layers.Dense(layer[-1], 16))
     layer.append(layers.Activation(layer[-1], T.leaky_relu))
     layer.append(layers.Dense(layer[-1], 2))
     return layer
 
 
-BS = 100
-lr = 0.00001
+BS = 50
+lr = 0.000001
 
 # create dataset
-def create_dataset(centroids=None):
-#    centroids = np.random.randn(args.n_modes, args.D)
-#    centroids[1] = -centroids[0]
-#    centroids /= np.sqrt((centroids**2).sum(1, keepdims=True))
-#    centroids *= args.radius
-
-    DATA = np.random.randn(args.n_modes * 250, args.D) * args.std
-#    projector = np.random.randn(args.n_modes, Zdim, args.D)
-#    inv = np.linalg.inv(np.einsum('mkD,mKD->mKk', projector, projector))
-#    projector = np.einsum('mkD,mKk->mKD',projector, inv)
-#    projector = projector.repeat(250, 0)
-#
-    DATA +=  centroids.repeat(250, 0)
-    #np.einsum('NKD,NK->ND', projector, DATA) + centroids.repeat(250, 0)
-    return DATA
+def create_dataset(centroids):
+    noise = np.random.randn(args.n_modes * 250, args.D) * args.std
+    centroids2 = centroids + 0.
+    centroids2[0] += args.radius
+    return (noise + centroids2.repeat(250, 0)) * args.scale
 
 
 # create placeholders and predictions
@@ -77,9 +68,7 @@ gen_loss = losses.sparse_crossentropy_logits(1 - labels[:BS],
 masks = T.concatenate([G_sample[1] > 0, G_sample[3] > 0], 1)
 
 # compute the slope matrix for the poitns and its determinant
-A = T.stack([gradients(G_sample[-1][:,i].sum(), [Z])[0]
-             for i in range(args.D)], 1)
-print(A.shape)
+A = jacobian_backward(G_sample[-1].sum(0), [Z])[0].transpose([1, 0, 2])
 det = T.sqrt(T.abs(T.det(T.matmul(A.transpose([0, 2, 1]), A))))
 
 # variables
@@ -87,13 +76,15 @@ d_variables = sum([l.variables() for l in logits], [])
 g_variables = sum([l.variables() for l in G_sample], [])
 
 # updates
-updates_d, varsd = optimizers.Adam(disc_loss, d_variables, lr)
-updates_g, varsg = optimizers.Adam(gen_loss, g_variables, lr)
-updates = {**updates_d, **updates_g}
+opt_d = optimizers.Adam(disc_loss, d_variables, lr)
+opt_g = optimizers.Adam(gen_loss, g_variables, lr)
 
 # functions
-f = function(Z, X, outputs = [disc_loss, gen_loss],
-             updates = updates)
+train_d = function(Z, X, outputs = [disc_loss],
+             updates = opt_d.updates)
+train_g = function(Z, X, outputs = [gen_loss],
+             updates = opt_g.updates)
+
 g = function(Z, outputs=[G_sample[-1]])
 h = function(Z, outputs=[det])
 
@@ -102,18 +93,22 @@ np.random.seed(10)
 for run in range(10):
 
     # reset variables
-    for var in varsd+varsg+d_variables+g_variables:
+    for var in d_variables+g_variables+opt_d.variables+opt_g.variables:
         var.reset()
     DATA = create_dataset(np.random.randn(args.n_modes, args.D))
 
+    loss = list()
     # training
     for epoch in tqdm(range(16000), desc='training'):
         for x in batchify(DATA, batch_size=BS, option='random_see_all'):
-            z = np.random.rand(BS, Zdim) * 2 -1
-            f(z, x)
+            z = np.random.randn(BS, Zdim)
+            loss.append(train_d(z, x))
+            z = np.random.randn(BS, Zdim)
+            loss.append(train_g(z, x))
+    loss = np.array(loss)
 
     # sample points
-    z_samples = np.random.rand(50000, Zdim) * 2 -1
+    z_samples = np.random.randn(50000, Zdim)
     x_samples = list()
     det_samples = list()
     for x in batchify(z_samples, batch_size=BS, option='continuous'):
@@ -123,6 +118,7 @@ for run in range(10):
     det_samples = np.concatenate(det_samples)
 
     # save into numpy file
-    filename = 'determinant_comparison_{}_{}_{}_{}_{}_{}.npz'
-    np.savez(filename.format(args.radius, args.std, args.D, args.WG, args.n_modes, run),
-             determinant=det_samples, samples=x_samples, data=DATA)
+    filename = 'determinant_comparison_{}_{}_{}_{}_{}_{}_{}.npz'
+    np.savez(filename.format(args.radius, args.scale, args.std, args.D,
+                             args.WG, args.n_modes, run),
+             determinant=det_samples, samples=x_samples, data=DATA, loss=loss)
