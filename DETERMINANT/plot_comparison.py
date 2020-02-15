@@ -30,17 +30,18 @@ def get_stats(f1, f2):
     # now get distances
     c = list()
     for i in range(len(b)-1):
-        which = (outputs[:, 0]>b[i]) & (outputs[:, 0]<=b[i+1])
+        which = (outputs[:, 0] > b[i]) & (outputs[:, 0] <= b[i+1])
         if which.sum() > 0:
             c.append(outputs[which, 1].mean())
         else:
             c.append(np.nan)
-    return np.stack([a, np.array(c), b[1:]],0)
+    return np.stack([a, np.array(c), b[1:]], 0)
 #    determinants =  (determinants + 1e-12)
     mean = np.mean(determinants)
     std = np.std(determinants)
     gap = np.abs(determinants.min() - determinants.max())
     return np.log(gap)
+
 
 def do_plot(samples, data, name, run):
     for j in range(samples.shape[0]):
@@ -80,13 +81,15 @@ filename = 'determinant_comparison_{}_{}_{}_{}_{}_{}_{}.npz'
 MAXI = 30
 RUN = range(10)
 
-# STD 
+# STD
+
+
 def do_std():
     STD = [0.01, 0.05, 0.1, 0.3, 1.]
     scale = 1.
     radius = 0.
     cpt = 0
-    
+
     for run in RUN:
         data = list()
         samples = list()
@@ -103,7 +106,7 @@ def do_std():
         samples = np.array(samples).reshape((len(STD), 2, 500, 2))
         do_plot(samples, data, 'std', cpt)
         cpt += 1
-    
+
 
 # SCALE
 def do_scale():
@@ -111,7 +114,7 @@ def do_scale():
     radius = 0.
     std = 0.3
     cpt = 0
-    
+
     for run in RUN:
         data = list()
         samples = list()
@@ -136,7 +139,7 @@ def do_radius():
     scale = 1.
     std = 0.3
     cpt = 0
-    
+
     for run in RUN:
         data = list()
         samples = list()
@@ -153,7 +156,6 @@ def do_radius():
         samples = np.array(samples).reshape((len(RADIUS), 2, 500, 2))
         do_plot(samples, data, 'radius', cpt)
         cpt += 1
-
 
 
 do_radius()
@@ -186,7 +188,7 @@ for i in range(len(D)):
     for j in range(len(STD)):
         plt.subplot(len(D), len(STD), cpt)
         for r in range(len(RUN)):
-            plt.plot(data[i, j, r, 1])#,(data[i, j, BEST[i, j], 0]))
+            plt.plot(data[i, j, r, 1])  # ,(data[i, j, BEST[i, j], 0]))
 #        plt.xlim([xmin, xmax])
         plt.ylim([data[:, :, :, 1].min(), data[:, :, :, 1].max()])
 #        plt.xticks([])
@@ -198,10 +200,6 @@ for i in range(len(D)):
 plt.tight_layout()
 plt.savefig('test_plot3.jpg')
 plt.close()
-
-
-
-
 
 
 plt.figure(figsize=(8, 6))
