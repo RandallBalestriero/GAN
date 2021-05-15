@@ -3,35 +3,6 @@ import numpy as np
 import time
 
 
-@tf.function
-def clone_relu1(x):
-    S = x.shape
-    mask = x[: S[0] // 2] > 0
-    mask = tf.tile(mask, [2] + [1] * (len(S) - 1))
-    return tf.where(mask, x, 0)
-
-
-@tf.function
-def clone_relu2(x):
-    S = x.shape
-    x = tf.reshape(x, (2, S[0] // 2) + S[1:])
-    mask = x[0] > 0
-    out = tf.where(mask, x, 0)
-    return tf.reshape(out, S)
-
-
-@tf.function
-def clone_relu3(x):
-    xonly = x[: x.shape[0] // 2]
-    xonly = tf.tile(xonly, [2] + [1] * (len(x.shape) - 1))
-    with tf.autodiff.ForwardAccumulator(primals=xonly, tangents=x) as acc:
-        output = tf.nn.relu(xonly)
-    return acc.jvp(output)
-
-
-@tf.function
-def relu(x):
-    return tf.nn.relu(x)
 
 
 @tf.function
@@ -48,25 +19,6 @@ def clone_sigmoid(x):
 @tf.function
 def sigmoid(x):
     return tf.sigmoid(x)
-
-
-@tf.function
-def clone_maxpool(x, ksize=(3, 3), strid=1, pad="VALID"):
-    x, u = tf.split(x, 2)
-    ma_x, Jx = tf.nn.max_pool_with_argmax(
-        x, ksize, strid, pad, include_batch_in_index=True
-    )
-    Jx = tf.cast(Jx, "int32")
-    flat_u = tf.reshape(u, [-1])
-    Jx_u = tf.gather(flat_u, Jx)
-    out = tf.concat([ma_x, Jx_u], 0)
-    return out
-
-
-@tf.function
-def maxpool(x, ksize=(3, 3), strid=1, pad="VALID"):
-    return tf.nn.max_pool(x, ksize, strid, pad)
-
 
 @tf.function
 def clone_dropout(x, rate=0.5, train=True):
